@@ -1,0 +1,78 @@
+name: Build Image
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      docker_namespace:
+        required: true
+        type: string
+      java_version:
+        required: true
+        type: string
+    secrets:
+      github_repo_actor:
+        required: true
+      github_repo_token:
+        required: true
+      docker_username:
+        required: true
+      docker_password:
+        required: true
+
+env:
+  DOCKER_NAMESPACE: ${{ inputs.docker_namespace }}
+  DOCKER_REPO: ${{ inputs.app_name }}
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up JDK ${{ inputs.java_version }}
+      uses: actions/setup-java@v2
+      with:
+        java-version: '${{ inputs.java_version }}'
+        distribution: 'temurin'
+        cache: maven
+        
+    - name: 'Setup github packages maven settings file'
+      uses: whelk-io/maven-settings-xml-action@v4
+      with:
+        repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
+        servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
+
+    - name: Build with Maven
+      run: |
+        echo Building version ${{ github.run_number }}
+        mvn versions:set -DnewVersion=${{ github.run_number }}
+        mvn clean install -P uberjar
+      env:
+        GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
+        GITHUB_TOKEN: ${{ secrets.github_repo_token }}
+
+    - name: Build Image
+      run: |
+        docker build \
+          -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}:${{github.run_number}} \
+          -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}:latest \
+          -f Dockerfile \
+          .
+    - name: Push Image
+      run: |
+        docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}" 
+        docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}
+      env:
+        DOCKER_USERNAME: ${{ secrets.docker_username }}
+        DOCKER_PASSWORD: ${{ secrets.docker_password }}
+
+    - name: Create github Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{github.run_number}}
+        target_commitish: ${{ github.sha }}
