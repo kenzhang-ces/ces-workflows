@@ -1,0 +1,21 @@
+name: Auto cut release branch
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  GITHUB_TOKEN: ${{ secrets.github_token }}
+
+jobs:
+  auto-cut-release-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Commit and push repo yaml
+        run: |
+          VERSION="release_$(date '+%Y_%m_%d')"
+          git checkout -b "$VERSION"
+          echo "$VERSION"
+          git push --set-upstream origin "$VERSION"

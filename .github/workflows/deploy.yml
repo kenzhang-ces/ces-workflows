@@ -1,0 +1,86 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      env:
+        type: string
+        required: true
+      ver:
+        required: true
+        type: string
+      target_argocd_repo:
+        required: true
+        type: string
+      dryrun:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      service_account_access_token:
+        required: true
+      docker_username:
+        required: true
+      docker_password:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy (${{ inputs.env }} -> ${{ inputs.ver }})
+    environment:
+      name: ${{ inputs.env }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ inputs.ver }}
+
+      - name: Checkout GitOps Repo
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ inputs.target_argocd_repo}}
+          token: ${{ secrets.service_account_access_token }}
+          fetch-depth: 0
+          path: ./argocd-gitops
+
+      - name: 'run helm templates'
+        run: |
+          rm -rf ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }} || echo "Nothing to delete"
+          mkdir -p ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }}
+
+          docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}"
+          docker run --rm \
+            -v "$(pwd):/apps" \
+            -w /apps \
+            syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
+            template -f /apps/k8s/values/values.${{ github.event.inputs.env }}.yaml \
+            --set "version=${{ github.event.inputs.ver }}" \
+            /apps/k8s/ \
+            --debug \
+            --output-dir ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }}
+        env:
+          DOCKER_USERNAME: ${{ secrets.docker_username }}
+          DOCKER_PASSWORD: ${{ secrets.docker_password }}
+
+      - name: 'Commit helm changes'
+        run: |
+          env=${{ github.event.inputs.env }}
+          ebv=${{ github.event.inputs.ver }}
+
+          cd ./argocd-gitops
+          git config --local user.email "GitHub@Coexservices.com.au"
+          git config --local user.name "GitHub"
+          git add ${{ inputs.app_name }}/
+
+          git commit -m "Deploy App ${{ github.repository }}: $ebv for $env"
+          git tag -f -a ${{ github.repository }}-$ebv-$env -m "Tagging commit built in GitHub"
+
+      - name: 'Push helm changes'
+        if: inputs.dryrun != true
+        run: |
+          git push --force --tags
+          git push
