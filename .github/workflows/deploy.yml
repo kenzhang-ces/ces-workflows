@@ -27,6 +27,8 @@ on:
       docker_password:
         required: true
 
+run-name: Deploy to ${{ github.event.inputs.env }} release ${{ github.event.inputs.ver }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
