@@ -1,0 +1,85 @@
+name: Build Image
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      docker_namespace:
+        required: true
+        type: string
+      java_version:
+        required: true
+        type: string
+    secrets:
+      github_repo_actor:
+        required: true
+      github_repo_token:
+        required: true
+      docker_username:
+        required: true
+      docker_password:
+        required: true
+
+env:
+  DOCKER_NAMESPACE: ${{ inputs.docker_namespace }}
+  DOCKER_REPO: ${{ inputs.app_name }}
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up JDK ${{ inputs.java_version }}
+      uses: actions/setup-java@v3
+      with:
+        java-version: '${{ inputs.java_version }}'
+        distribution: 'temurin'
+        
+    - name: 'Setup github packages gradle settings file'
+      run: |
+        mkdir -p $HOME/.gradle
+        echo "allprojects { repositories { mavenCentral(); maven { name \"GitHubPackages\"; url uri(\"https://maven.pkg.github.com/coexservices/*\"); credentials { username githubRepoActor; password githubRepoToken } } } }" > ~/.gradle/init.gradle
+        echo "githubRepoActor=${{ secrets.github_repo_actor }}" > ~/.gradle/gradle.properties
+        echo "githubRepoToken=${{ secrets.github_repo_token }}" >> ~/.gradle/gradle.properties
+
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+
+    - name: "Build with Gradle | version: ${{ github.run_number }}"
+      run: |
+        ./gradlew clean build -Pversion=${{github.run_number}}
+      env:
+        GITHUB_USERNAME: ${{ secrets.github_repo_actor }}
+        GITHUB_PASSWORD: ${{ secrets.github_repo_token }}
+
+    - name: Build Image
+      run: |
+        docker build \
+          -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}:${{github.run_number}} \
+          -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}:latest \
+          -f Dockerfile \
+          .
+    - name: Push Image
+      run: |
+        docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}" 
+        docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}
+      env:
+        DOCKER_USERNAME: ${{ secrets.docker_username }}
+        DOCKER_PASSWORD: ${{ secrets.docker_password }}
+
+    - name: Create github Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{github.run_number}}
+        target_commitish: ${{ github.sha }}
+
+    - name: Publish JUnit Test Report
+      uses: mikepenz/action-junit-report@v3
+      if: always() # always run even if the previous step fails
+      with:
+        report_paths: '**/build/test-results/test/TEST-*.xml'
