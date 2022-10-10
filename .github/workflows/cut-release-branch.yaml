@@ -15,7 +15,7 @@ jobs:
 
       - name: Commit and push repo yaml
         run: |
-          VERSION="release_$(date '+%Y_%m_%d')"
+          VERSION="release_$(date '+%Y_%U')"
           git checkout -b "$VERSION"
           echo "$VERSION"
           git push --set-upstream origin "$VERSION"
