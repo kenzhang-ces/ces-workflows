@@ -40,6 +40,14 @@ jobs:
         checkAllCommitMessages: true
         accessToken: ${{ secrets.GITHUB_TOKEN }} # github access token is only required if checkAllCommitMessages is true
 
+    - name: Project Step Calculator
+      run: |
+        echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )"
+        echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
+        echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )"
+        echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )" >> $GITHUB_ENV
+        echo "SNYK_AUTH_TOKEN=${{ secrets.snyk_auth_token }}" >> $GITHUB_ENV
+
     - name: Set up JDK ${{ inputs.java_version }}
       uses: actions/setup-java@v2
       with:
@@ -53,16 +61,30 @@ jobs:
         repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
         servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
 
-    - name: Build with Maven
-      run: |
-        echo Building version ${{github.run_number}}
-        mvn versions:set -DnewVersion=${{ github.run_number }}
-        mvn clean install -P uberjar
+    - uses: snyk/actions/setup@master
+    - name: 'Authenticate Snyk CLI'
+      run: snyk auth ${SNYK_AUTH_TOKEN}
+
+    - uses: actions/setup-python@v2
+      if: env.HAS_PRE_COMMIT == 'true'
+    - uses: cloudposse/github-action-pre-commit@v2.1.2  # run pre-commit
+      if: env.HAS_PRE_COMMIT == 'true'
       env:
         GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
         GITHUB_TOKEN: ${{ secrets.github_repo_token }}
 
+    - name: Build with Maven
+      run: |
+        echo Building version ${{github.run_number}}
+        mvn versions:set -DnewVersion=${{ github.run_number }}
+        mvn clean install -P uberjar --batch-mode
+      env:
+        GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
+        GITHUB_TOKEN: ${{ secrets.github_repo_token }}
+
+
     - name: "check sit k8s helm charts"
+      if: env.HAS_K8S_DIR == 'true'
       run: |
         docker login syd.ocir.io -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
         docker run --rm \
@@ -72,6 +94,7 @@ jobs:
           template -f /apps/k8s/values/values.sit.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
 
     - name: "check uat k8s helm charts"
+      if: env.HAS_K8S_DIR == 'true'
       run: |
         docker run --rm \
           -v "$(pwd):/apps" \
@@ -80,6 +103,7 @@ jobs:
           template -f /apps/k8s/values/values.uat.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
 
     - name: "check prod k8s helm charts"
+      if: env.HAS_K8S_DIR == 'true'
       run: |
         docker run --rm \
           -v "$(pwd):/apps" \

@@ -51,7 +51,7 @@ jobs:
       run: |
         echo Building version ${{ github.run_number }}
         mvn versions:set -DnewVersion=${{ github.run_number }}
-        mvn clean install -P uberjar
+        mvn clean install -P uberjar --batch-mode
       env:
         GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
         GITHUB_TOKEN: ${{ secrets.github_repo_token }}
