@@ -37,12 +37,12 @@ jobs:
       name: ${{ inputs.env }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: ${{ inputs.ver }}
 
       - name: Checkout GitOps Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: ${{ inputs.target_argocd_repo}}
           token: ${{ secrets.service_account_access_token }}
@@ -79,10 +79,17 @@ jobs:
           git add ${{ inputs.app_name }}/
 
           git commit -m "Deploy App ${{ github.repository }}: $ebv for $env"
+          
+          if [ $(git tag -l "${{ github.repository }}-$ebv-$env") ]; then
+            echo "--- Cleaning up old tag ---"
+            git push --delete origin ${{ github.repository }}-$ebv-$env || echo ""
+          fi
           git tag -f -a ${{ github.repository }}-$ebv-$env -m "Tagging commit built in GitHub"
 
       - name: 'Push helm changes'
         if: inputs.dryrun != true
         run: |
-          git push --force --tags
+          cd ./argocd-gitops
+          git log -2 --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ar) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+          git push --tags
           git push
