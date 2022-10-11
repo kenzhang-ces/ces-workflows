@@ -3,6 +3,9 @@ name: Auto cut release branch
 on:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      slack_webhook_test_url:
+        required: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -19,3 +22,13 @@ jobs:
           git checkout -b "$VERSION"
           echo "$VERSION"
           git push --set-upstream origin "$VERSION"
+
+      - name: Send msg to slack
+        run: |
+          if [ ! -z "${{ secrets.slack_webhook_test_url }}" ]
+          then
+            echo "Sending slack message ;)"
+            .github/scripts/slack-cut-release-branch-msg.sh "${{ github.repository }}" "${{ secrets.SLACK_WEBHOOK_TEST_URL }}"
+          else
+            echo "Skipping slack message. Have you thought about adding the secret to your build ?"
+          fi

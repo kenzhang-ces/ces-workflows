@@ -27,6 +27,8 @@ on:
       docker_password:
         required: true
 
+run-name: Deploy to ${{ github.event.inputs.env }} release ${{ github.event.inputs.ver }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -59,6 +61,7 @@ jobs:
             syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
             template -f /apps/k8s/values/values.${{ github.event.inputs.env }}.yaml \
             --set "version=${{ github.event.inputs.ver }}" \
+            --set "run=${{ github.run_number }}" \
             /apps/k8s/ \
             --debug \
             --output-dir ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }}
