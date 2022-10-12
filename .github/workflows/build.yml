@@ -47,7 +47,7 @@ jobs:
         repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
         servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
 
-    - name: Build with Maven
+    - name: "Build with Maven | version: ${{ github.run_number }}"
       run: |
         echo Building version ${{ github.run_number }}
         mvn versions:set -DnewVersion=${{ github.run_number }}
