@@ -54,8 +54,10 @@ jobs:
       run: |
         echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )"
         echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_IAM_DIR=$( [ -d ./infra/iam ] && echo true || echo false )"
-        echo "HAS_IAM_DIR=$( [ -d ./infra/iam ] && echo true || echo false )" >> $GITHUB_ENV
+        echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )"
+        echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
+        echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )"
+        echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
         echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )"
         echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )" >> $GITHUB_ENV
         echo "SNYK_AUTH_TOKEN=${{ secrets.snyk_auth_token }}" >> $GITHUB_ENV
@@ -84,7 +86,6 @@ jobs:
         GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
         GITHUB_TOKEN: ${{ secrets.github_repo_token }}
 
-
     - name: "Build with Gradle | version: ${{ github.run_number }}"
       run: |
         ./gradlew clean build -Pversion=${{github.run_number}}
@@ -92,10 +93,18 @@ jobs:
         GITHUB_USERNAME: ${{ secrets.github_repo_actor }}
         GITHUB_PASSWORD: ${{ secrets.github_repo_token }}
 
-    - name: "Check terraform"
+    - name: "Validate iam terraform"
       if: env.HAS_IAM_DIR == 'true'
       run: |
-        cd infra/iam
+        cd iam
+        terraform init -backend=false
+        terraform validate
+        cd ../..
+
+    - name: "Validate infra terraform"
+      if: env.HAS_INFRA_DIR == 'true'
+      run: |
+        cd infra
         terraform init -backend=false
         terraform validate
         cd ../..
@@ -104,14 +113,23 @@ jobs:
       run: |
         docker login ${DOCKER_NAMESPACE} -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
 
-    - name: "Build Terraform Docker image"
+    - name: "Build iam Docker image"
       if: env.HAS_IAM_DIR == 'true'
       run: |
         docker build \
         -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam:${{github.run_number}} \
         -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam:latest \
-        -f ./infra/Dockerfile.iam \
-        ./infra/
+        -f Dockerfile.iam \
+        .
+
+    - name: "Build infra Docker image"
+      if: env.HAS_INFRA_DIR == 'true'
+      run: |
+        docker build \
+        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_infra:${{github.run_number}} \
+        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_infra:latest \
+        -f Dockerfile.infra \
+        .
 
     - name: "check sit k8s helm charts"
       if: env.HAS_K8S_DIR == 'true'
