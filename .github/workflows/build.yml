@@ -39,7 +39,12 @@ jobs:
       with:
         java-version: '${{ inputs.java_version }}'
         distribution: 'temurin'
-        
+
+    - name: Project Step Calculator
+      run: |
+        echo "HAS_IAM_DIR=$( [ -d ./infra/iam ] && echo true || echo false )"
+        echo "HAS_IAM_DIR=$( [ -d ./infra/iam ] && echo true || echo false )" >> $GITHUB_ENV
+
     - name: 'Setup github packages gradle settings file'
       run: |
         mkdir -p $HOME/.gradle
@@ -57,6 +62,19 @@ jobs:
         GITHUB_USERNAME: ${{ secrets.github_repo_actor }}
         GITHUB_PASSWORD: ${{ secrets.github_repo_token }}
 
+    - name: Docker Login
+      run: |
+        docker login ${DOCKER_NAMESPACE} -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
+
+    - name: "Build IAM image"
+      if: env.HAS_IAM_DIR == 'true'
+      run: |
+        docker build \
+        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam:${{github.run_number}} \
+        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam:latest \
+        -f ./infra/Dockerfile.iam \
+        ./infra/
+
     - name: Build Image
       run: |
         docker build \
@@ -64,9 +82,16 @@ jobs:
           -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}:latest \
           -f Dockerfile \
           .
+
+    - name: Push IAM Image
+      run: |
+        docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam
+      env:
+        DOCKER_USERNAME: ${{ secrets.docker_username }}
+        DOCKER_PASSWORD: ${{ secrets.docker_password }}
+
     - name: Push Image
       run: |
-        docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}" 
         docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}
       env:
         DOCKER_USERNAME: ${{ secrets.docker_username }}

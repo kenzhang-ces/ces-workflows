@@ -95,7 +95,10 @@ jobs:
     - name: "Check terraform"
       if: env.HAS_IAM_DIR == 'true'
       run: |
+        cd infra/iam
+        terraform init -backend=false
         terraform validate
+        cd ../..
 
     - name: Docker Login
       run: |
