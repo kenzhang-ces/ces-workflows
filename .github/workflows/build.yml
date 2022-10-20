@@ -22,6 +22,14 @@ on:
         required: true
       docker_password:
         required: true
+      oracle_dev_liquibase_atp_datasource_url:
+        required: false
+      oracle_dev_liquibase_atp_datasource_username:
+        required: false
+      oracle_dev_liquibase_atp_datasource_password:
+        required: false
+      oracle_dev_liquibase_atp_wallet:
+        required: false
 
 env:
   DOCKER_NAMESPACE: ${{ inputs.docker_namespace }}
@@ -46,6 +54,8 @@ jobs:
         echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
         echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )"
         echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
+        echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )"
+        echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
 
     - name: 'Setup github packages gradle settings file'
       run: |
@@ -56,6 +66,18 @@ jobs:
 
     - name: Setup Gradle
       uses: gradle/gradle-build-action@v2
+
+    - name: 'Setup db wallet'
+      if: env.ORACLE_WALLET_PRESENT == 'true'
+      run: |
+        echo $ORACLE_WALLET | base64 -d > ~/Wallet_LIQUIBASE.zip
+        unzip ~/Wallet_LIQUIBASE.zip -d ~/Wallet_LIQUIBASE
+        
+        echo "SPRING_DATASOURCE_URL=${{ secrets.oracle_dev_liquibase_atp_datasource_url }}" >> $GITHUB_ENV
+        echo "SPRING_DATASOURCE_USERNAME=${{ secrets.oracle_dev_liquibase_atp_datasource_username }}" >> $GITHUB_ENV
+        echo "SPRING_DATASOURCE_PASSWORD=${{ secrets.oracle_dev_liquibase_atp_datasource_password }}" >> $GITHUB_ENV
+      env:
+        ORACLE_WALLET: ${{ secrets.ORACLE_DEV_LIQUIBASE_ATP_WALLET }}
 
     - name: "Build with Gradle | version: ${{ github.run_number }}"
       run: |
