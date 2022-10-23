@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   workflow_call:
     secrets:
-      slack_webhook_test_url:
+      slack_webhook_ces_engineering_team_url:
         required: false
 
 env:
@@ -14,7 +14,9 @@ jobs:
   auto-cut-release-branch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Commit and push repo yaml
         run: |
@@ -23,12 +25,19 @@ jobs:
           echo "$VERSION"
           git push --set-upstream origin "$VERSION"
 
+      - name: Checkout workflows repo
+        uses: actions/checkout@v3
+        with:
+          repository: coexservices/workflows
+          path: ./workflows
+
+
       - name: Send msg to slack
         run: |
-          if [ ! -z "${{ secrets.slack_webhook_test_url }}" ]
+          if [ ! -z "${{ secrets.slack_webhook_ces_engineering_team_url }}" ]
           then
             echo "Sending slack message ;)"
-            .github/scripts/slack-cut-release-branch-msg.sh "${{ github.repository }}" "${{ secrets.SLACK_WEBHOOK_TEST_URL }}"
+            workflows/.github/scripts/slack-cut-release-branch-msg.sh "${{ github.repository }}" "${{ secrets.slack_webhook_ces_engineering_team_url }}"
           else
             echo "Skipping slack message. Have you thought about adding the secret to your build ?"
           fi
