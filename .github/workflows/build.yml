@@ -50,12 +50,9 @@ jobs:
 
     - name: Project Step Calculator
       run: |
-        echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )"
-        echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )"
-        echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )"
         echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
+        
+        cat $GITHUB_ENV
 
     - name: 'Setup github packages gradle settings file'
       run: |
@@ -90,24 +87,6 @@ jobs:
       run: |
         docker login ${DOCKER_NAMESPACE} -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
 
-    - name: "Build IAM image"
-      if: env.HAS_IAM_DIR == 'true'
-      run: |
-        docker build \
-        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam:${{github.run_number}} \
-        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam:latest \
-        -f ./Dockerfile.iam \
-        .
-
-    - name: "Build INFRA image"
-      if: env.HAS_INFRA_DIR == 'true'
-      run: |
-        docker build \
-        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_infra:${{github.run_number}} \
-        -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}_infra:latest \
-        -f ./Dockerfile.infra \
-        .
-
     - name: Build Image
       run: |
         docker build \
@@ -115,22 +94,6 @@ jobs:
           -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}:latest \
           -f Dockerfile \
           .
-
-    - name: Push IAM Image
-      if: env.HAS_IAM_DIR == 'true'
-      run: |
-        docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}_iam
-      env:
-        DOCKER_USERNAME: ${{ secrets.docker_username }}
-        DOCKER_PASSWORD: ${{ secrets.docker_password }}
-
-    - name: Push INFRA Image
-      if: env.HAS_INFRA_DIR == 'true'
-      run: |
-        docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}_infra
-      env:
-        DOCKER_USERNAME: ${{ secrets.docker_username }}
-        DOCKER_PASSWORD: ${{ secrets.docker_password }}
 
     - name: Push Image
       run: |
