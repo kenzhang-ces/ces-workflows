@@ -21,18 +21,252 @@ on:
         default: false
     secrets:
       service_account_access_token:
-        required: true
+        required: false
       docker_username:
-        required: true
+        required: false
       docker_password:
-        required: true
+        required: false
 
 run-name: Deploy to ${{ github.event.inputs.env }} release ${{ github.event.inputs.ver }}
 
 jobs:
-  deploy:
+
+  project-step-calculator:
     runs-on: ubuntu-latest
-    name: Deploy (${{ inputs.env }} -> ${{ inputs.ver }})
+    outputs:
+      HAS_IAM_DIR: ${{ steps.step-calculator.outputs.HAS_IAM_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ver }}
+
+      - name: Project Step Calculator
+        id: step-calculator
+        run: |
+          echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          
+          cat $GITHUB_OUTPUT
+
+  deploy-terraform-plan:
+    needs: [project-step-calculator]
+    if: needs.project-step-calculator.outputs.HAS_IAM_DIR == 'true'
+    runs-on: [self-hosted, nonprod]
+    name: Deploy terraform Plan (${{ inputs.env }} -> ${{ inputs.ver }})
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ver }}
+
+      - name: Environment Variable Setup
+        run: |
+          case ${{ inputs.env }} in
+          sit)
+          AWS_ACCOUNT_NAME=development
+          AWS_ACCOUNT_NUMBER=398662845025
+          ;;
+          uat)
+          AWS_ACCOUNT_NAME=staging
+          AWS_ACCOUNT_NUMBER=330977107317
+          ;;
+          prod)
+          AWS_ACCOUNT_NAME=production
+          AWS_ACCOUNT_NUMBER=123963708064
+          ;;
+          esac
+          
+          echo "AWS_ACCOUNT_NAME=$AWS_ACCOUNT_NAME" >> $GITHUB_ENV
+          echo "AWS_ACCOUNT_NUMBER=$AWS_ACCOUNT_NUMBER" >> $GITHUB_ENV
+          echo "REGION=ap-southeast-2" >> $GITHUB_ENV
+          
+          cat $GITHUB_ENV
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Configure aws credentials
+        id: login-aws
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/CloudGithubRunnerRole
+          role-session-name: GithubSession_${{ inputs.app_name }}
+          aws-region: ap-southeast-2
+
+      - name: setup python
+        uses: actions/setup-python@v4
+
+      - name: Setup AWS CLI
+        run:
+          pip3 --no-cache-dir install --upgrade awscli
+
+      - name: Assume IAM role
+        id: assume-iam-deployer-role
+        run: |
+          output="./assume-role-output.json"
+          
+          aws sts assume-role \
+            --role-arn "arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/CloudIamDeployRole" \
+            --role-session-name GithubSessionIamDeploy_${{ inputs.app_name }} > $output
+          
+          AccessKeyId=$(cat $output | jq -r '.Credentials.AccessKeyId')
+          SecretAccessKey=$(cat $output | jq -r '.Credentials.SecretAccessKey')
+          SessionToken=$(cat $output | jq -r '.Credentials.SessionToken')
+          
+          echo "::add-mask::$AccessKeyId"
+          echo "::add-mask::$SecretAccessKey"
+          echo "::add-mask::$SessionToken"
+
+          echo "AWS_ACCESS_KEY_ID=$AccessKeyId" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$SecretAccessKey" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$SessionToken" >> $GITHUB_ENV
+          cat $output
+          cat $GITHUB_ENV
+
+      - name: Terraform Init iam
+        run: |
+          aws sts get-caller-identity
+          cd iam
+          terraform init -input=false \
+            -backend-config="bucket=coex-${{ env.AWS_ACCOUNT_NAME }}-terraform-state" \
+            -backend-config="key=${{ inputs.app_name }}/${{ env.AWS_ACCOUNT_NAME }}/${{ env.REGION }}/iam/terraform.tfstate" \
+            -backend-config="region=${{ env.REGION }}" \
+            -backend-config="dynamodb_table=coex-${{ env.AWS_ACCOUNT_NAME }}-terraform-state-lock"
+
+      - name: Terraform Plan iam
+        run: |
+          cd iam
+          terraform plan \
+            -no-color \
+            -input=false \
+            -var-file=./vars/${{ env.AWS_ACCOUNT_NAME }}.tfvars \
+            -out=plan-iam.json
+
+      - name: Upload plan iam file
+        uses: actions/upload-artifact@v3
+        with:
+          name: plan-iam.json
+          path: iam/plan-iam.json
+
+  deploy-terraform-apply:
+    needs: [ project-step-calculator, deploy-terraform-plan ]
+    if: needs.project-step-calculator.outputs.HAS_IAM_DIR == 'true'
+    runs-on: [ self-hosted, nonprod ]
+    name: Deploy terraform Apply (${{ inputs.env }} -> ${{ inputs.ver }})
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: ${{ inputs.env }}-terraform
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ver }}
+
+      - name: Download plan iam file
+        uses: actions/download-artifact@v3
+        with:
+          name: plan-iam.json
+          path: iam
+
+      - name: Environment Variable Setup
+        run: |
+          case ${{ inputs.env }} in
+          sit)
+          AWS_ACCOUNT_NAME=development
+          AWS_ACCOUNT_NUMBER=398662845025
+          ;;
+          uat)
+          AWS_ACCOUNT_NAME=staging
+          AWS_ACCOUNT_NUMBER=330977107317
+          ;;
+          prod)
+          AWS_ACCOUNT_NAME=production
+          AWS_ACCOUNT_NUMBER=123963708064
+          ;;
+          esac
+          
+          echo "AWS_ACCOUNT_NAME=$AWS_ACCOUNT_NAME" >> $GITHUB_ENV
+          echo "AWS_ACCOUNT_NUMBER=$AWS_ACCOUNT_NUMBER" >> $GITHUB_ENV
+          echo "REGION=ap-southeast-2" >> $GITHUB_ENV
+          
+          cat $GITHUB_ENV
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Configure aws credentials
+        id: login-aws
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/CloudGithubRunnerRole
+          role-session-name: GithubSession_${{ inputs.app_name }}
+          aws-region: ap-southeast-2
+
+      - name: setup python
+        uses: actions/setup-python@v4
+
+      - name: Setup AWS CLI
+        run:
+          pip3 --no-cache-dir install --upgrade awscli
+
+      - name: Assume IAM role
+        id: assume-iam-deployer-role
+        run: |
+          output="./assume-role-output.json"
+          
+          aws sts assume-role \
+            --role-arn "arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/CloudIamDeployRole" \
+            --role-session-name GithubSessionIamDeploy_${{ inputs.app_name }} > $output
+          
+          AccessKeyId=$(cat $output | jq -r '.Credentials.AccessKeyId')
+          SecretAccessKey=$(cat $output | jq -r '.Credentials.SecretAccessKey')
+          SessionToken=$(cat $output | jq -r '.Credentials.SessionToken')
+          
+          echo "::add-mask::$AccessKeyId"
+          echo "::add-mask::$SecretAccessKey"
+          echo "::add-mask::$SessionToken"
+
+          echo "AWS_ACCESS_KEY_ID=$AccessKeyId" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$SecretAccessKey" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$SessionToken" >> $GITHUB_ENV
+          cat $output
+          cat $GITHUB_ENV
+
+      - name: Terraform Init iam
+        run: |
+          cd iam
+          aws sts get-caller-identity
+          terraform init -input=false \
+            -backend-config="bucket=coex-${{ env.AWS_ACCOUNT_NAME }}-terraform-state" \
+            -backend-config="key=${{ inputs.app_name }}/${{ env.AWS_ACCOUNT_NAME }}/${{ env.REGION }}/iam/terraform.tfstate" \
+            -backend-config="region=${{ env.REGION }}" \
+            -backend-config="dynamodb_table=coex-${{ env.AWS_ACCOUNT_NAME }}-terraform-state-lock"
+
+      - name: Terraform apply
+        run: |
+          cd iam
+          terraform apply \
+            -input=false \
+            -auto-approve \
+            plan-iam.json
+
+  deploy-app:
+    runs-on: ubuntu-latest
+    name: Deploy App (${{ inputs.env }} -> ${{ inputs.ver }})
     environment:
       name: ${{ inputs.env }}
     steps:
@@ -41,11 +275,20 @@ jobs:
         with:
           ref: ${{ inputs.ver }}
 
+      - name: Project Secret Calculator
+        id: secret-calculator
+        run: |
+          echo "GITHUB_ALL_REPO_READ_ACCESS_TOKEN=$( [ ! -z "${{ secrets.CES_ARGOCD_GITHUB_SERVICE_ACCOUNT_TOKEN }}" ] && echo ${{ secrets.CES_ARGOCD_GITHUB_SERVICE_ACCOUNT_TOKEN }} || echo ${{ secrets.service_account_access_token }} )" >> $GITHUB_ENV
+          echo "DOCKER_USERNAME=$( [ ! -z "${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_USERNAME }}" ] && echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_USERNAME }} || echo ${{ secrets.docker_username }} )" >> $GITHUB_ENV
+          echo "DOCKER_PASSWORD=$( [ ! -z "${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_PASSWORD }}" ] && echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_PASSWORD }} || echo ${{ secrets.docker_password }} )" >> $GITHUB_ENV
+          
+          cat $GITHUB_ENV
+
       - name: Checkout GitOps Repo
         uses: actions/checkout@v3
         with:
           repository: ${{ inputs.target_argocd_repo}}
-          token: ${{ secrets.service_account_access_token }}
+          token: ${{ env.GITHUB_ALL_REPO_READ_ACCESS_TOKEN }}
           fetch-depth: 0
           path: ./argocd-gitops
 
@@ -65,9 +308,6 @@ jobs:
             /apps/k8s/ \
             --debug \
             --output-dir ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }}
-        env:
-          DOCKER_USERNAME: ${{ secrets.docker_username }}
-          DOCKER_PASSWORD: ${{ secrets.docker_password }}
 
       - name: 'Commit helm changes'
         run: |
