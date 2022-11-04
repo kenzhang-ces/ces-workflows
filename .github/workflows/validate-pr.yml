@@ -17,13 +17,21 @@ on:
         required: true
       docker_password:
         required: true
+      oracle_dev_liquibase_atp_datasource_url:
+        required: false
+      oracle_dev_liquibase_atp_datasource_username:
+        required: false
+      oracle_dev_liquibase_atp_datasource_password:
+        required: false
+      oracle_dev_liquibase_atp_wallet:
+        required: false
   workflow_dispatch:
 
 jobs:
   validate-pr:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Check PR and commit formats
       uses: gsactions/commit-message-checker@v1
@@ -42,14 +50,17 @@ jobs:
 
     - name: Project Step Calculator
       run: |
-        echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )"
         echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )"
+        echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
+        echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
         echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )" >> $GITHUB_ENV
         echo "SNYK_AUTH_TOKEN=${{ secrets.snyk_auth_token }}" >> $GITHUB_ENV
+        echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
+        
+        cat $GITHUB_ENV
 
     - name: Set up JDK ${{ inputs.java_version }}
-      uses: actions/setup-java@v2
+      uses: actions/setup-java@v3
       with:
         java-version: '${{ inputs.java_version }}'
         distribution: 'temurin'
@@ -60,6 +71,22 @@ jobs:
       with:
         repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
         servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
+
+
+    - name: 'Setup db wallet'
+      if: env.ORACLE_WALLET_PRESENT == 'true'
+      run: |
+        echo $ORACLE_WALLET | base64 -d > ~/Wallet_LIQUIBASE.zip
+        unzip ~/Wallet_LIQUIBASE.zip -d ~/Wallet_LIQUIBASE
+        
+        echo "SPRING_DATASOURCE_URL=${{ secrets.oracle_dev_liquibase_atp_datasource_url }}" >> $GITHUB_ENV
+        echo "SPRING_DATASOURCE_USERNAME=${{ secrets.oracle_dev_liquibase_atp_datasource_username }}" >> $GITHUB_ENV
+        echo "SPRING_DATASOURCE_PASSWORD=${{ secrets.oracle_dev_liquibase_atp_datasource_password }}" >> $GITHUB_ENV
+        
+        cat $GITHUB_ENV
+
+      env:
+        ORACLE_WALLET: ${{ secrets.ORACLE_DEV_LIQUIBASE_ATP_WALLET }}
 
     - uses: snyk/actions/setup@master
     - name: 'Authenticate Snyk CLI'
@@ -73,20 +100,37 @@ jobs:
         GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
         GITHUB_TOKEN: ${{ secrets.github_repo_token }}
 
-    - name: Build with Maven
+    - name: "Build with Maven | version: ${{ github.run_number }}"
       run: |
-        echo Building version ${{github.run_number}}
         mvn versions:set -DnewVersion=${{ github.run_number }}
         mvn clean install -P uberjar --batch-mode
       env:
         GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
         GITHUB_TOKEN: ${{ secrets.github_repo_token }}
 
+    - name: "Validate iam terraform"
+      if: env.HAS_IAM_DIR == 'true'
+      run: |
+        cd iam
+        terraform init -backend=false
+        terraform validate
+        cd ../..
+
+    - name: "Validate infra terraform"
+      if: env.HAS_INFRA_DIR == 'true'
+      run: |
+        cd infra
+        terraform init -backend=false
+        terraform validate
+        cd ../..
+
+    - name: Docker Login
+      run: |
+        docker login syd.ocir.io -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
 
     - name: "check sit k8s helm charts"
       if: env.HAS_K8S_DIR == 'true'
       run: |
-        docker login syd.ocir.io -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
         docker run --rm \
           -v "$(pwd):/apps" \
           -w /apps \
@@ -110,3 +154,9 @@ jobs:
           -w /apps \
           syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
           template -f /apps/k8s/values/values.prod.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+
+    - name: Publish JUnit Test Report
+      uses: mikepenz/action-junit-report@v3
+      if: always() # always run even if the previous step fails
+      with:
+        report_paths: '**/target/surefire-reports/TEST-*.xml'
