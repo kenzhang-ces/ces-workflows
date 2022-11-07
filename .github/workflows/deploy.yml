@@ -96,7 +96,7 @@ jobs:
         id: login-aws
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/CIDeployAccess
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/CloudGithubRunnerRole
           role-session-name: GithubSession_${{ inputs.app_name }}
           aws-region: ap-southeast-2
 
