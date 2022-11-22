@@ -22,6 +22,14 @@ on:
         required: true
       docker_password:
         required: true
+      oracle_dev_liquibase_atp_datasource_url:
+        required: false
+      oracle_dev_liquibase_atp_datasource_username:
+        required: false
+      oracle_dev_liquibase_atp_datasource_password:
+        required: false
+      oracle_dev_liquibase_atp_wallet:
+        required: false
 
 env:
   DOCKER_NAMESPACE: ${{ inputs.docker_namespace }}
@@ -32,20 +40,41 @@ jobs:
   build-image:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Set up JDK ${{ inputs.java_version }}
-      uses: actions/setup-java@v2
+      uses: actions/setup-java@v3
       with:
         java-version: '${{ inputs.java_version }}'
         distribution: 'temurin'
         cache: maven
+
+    - name: Project Step Calculator
+      run: |
+        echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
+        
+        cat $GITHUB_ENV
         
     - name: 'Setup github packages maven settings file'
       uses: whelk-io/maven-settings-xml-action@v4
       with:
         repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
         servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
+
+    - name: 'Setup db wallet'
+      if: env.ORACLE_WALLET_PRESENT == 'true'
+      run: |
+        echo $ORACLE_WALLET | base64 -d > ~/Wallet_LIQUIBASE.zip
+        unzip ~/Wallet_LIQUIBASE.zip -d ~/Wallet_LIQUIBASE
+        
+        echo "SPRING_DATASOURCE_URL=${{ secrets.oracle_dev_liquibase_atp_datasource_url }}" >> $GITHUB_ENV
+        echo "SPRING_DATASOURCE_USERNAME=${{ secrets.oracle_dev_liquibase_atp_datasource_username }}" >> $GITHUB_ENV
+        echo "SPRING_DATASOURCE_PASSWORD=${{ secrets.oracle_dev_liquibase_atp_datasource_password }}" >> $GITHUB_ENV
+        
+        cat $GITHUB_ENV
+
+      env:
+        ORACLE_WALLET: ${{ secrets.ORACLE_DEV_LIQUIBASE_ATP_WALLET }}
 
     - name: "Build with Maven | version: ${{ github.run_number }}"
       run: |
@@ -56,6 +85,13 @@ jobs:
         GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
         GITHUB_TOKEN: ${{ secrets.github_repo_token }}
 
+    - name: Docker Login
+      run: |
+        docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}"
+      env:
+        DOCKER_USERNAME: ${{ secrets.docker_username }}
+        DOCKER_PASSWORD: ${{ secrets.docker_password }}
+
     - name: Build Image
       run: |
         docker build \
@@ -63,9 +99,9 @@ jobs:
           -t ${DOCKER_NAMESPACE}/${DOCKER_REPO}:latest \
           -f Dockerfile \
           .
+
     - name: Push Image
       run: |
-        docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}" 
         docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}
       env:
         DOCKER_USERNAME: ${{ secrets.docker_username }}
@@ -76,3 +112,9 @@ jobs:
       with:
         tag_name: ${{github.run_number}}
         target_commitish: ${{ github.sha }}
+
+    - name: Publish JUnit Test Report
+      uses: mikepenz/action-junit-report@v3
+      if: always() # always run even if the previous step fails
+      with:
+        report_paths: '**/target/surefire-reports/TEST-*.xml'
