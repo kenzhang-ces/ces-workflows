@@ -3,20 +3,23 @@ name: Validate PR
 on:
   workflow_call:
     inputs:
-      java_version:
-        required: true
+      build_args:
+        required: false
         type: string
+        default: ''
+      check_all_commit_msg:
+        required: false
+        type: boolean
+        default: true
+      docker_namespace:
+        required: false
+        type: string
+        default: 'syd.ocir.io/coexservices01'
+      java_version:
+        required: false
+        type: string
+        default: '17'
     secrets:
-      snyk_auth_token:
-        required: true
-      github_repo_actor:
-        required: true
-      github_repo_token:
-        required: true
-      docker_username:
-        required: true
-      docker_password:
-        required: true
       oracle_dev_liquibase_atp_datasource_url:
         required: false
       oracle_dev_liquibase_atp_datasource_username:
@@ -28,52 +31,105 @@ on:
   workflow_dispatch:
 
 jobs:
+  validate-commit-msg:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Check PR and commit formats
+        uses: gsactions/commit-message-checker@v1
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          pattern: '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
+          error: |
+            Your commit message and your PR title must follow the format of 'JIRA-123: ' 
+            Did you forget to add your jira?
+            Did you follow the correct format?
+
+            Please follow this format so Jira can auto detect what is in each release.
+            The regex is '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
+          checkAllCommitMessages: ${{ inputs.check_all_commit_msg }}
+          accessToken: ${{ secrets.GITHUB_TOKEN }} # github access token is only required if checkAllCommitMessages is true
+
+  validate-k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Project Step Calculator
+        run: |
+          echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
+
+      - name: Docker Login
+        run: |
+          docker login ${{ inputs.docker_namespace }} -u ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_USERNAME }} -p "${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_PASSWORD }}"
+
+      - name: "check sit k8s helm charts"
+        if: env.HAS_K8S_DIR == 'true'
+        run: |
+          docker run --rm \
+            -v "$(pwd):/apps" \
+            -w /apps \
+            syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
+            template -f /apps/k8s/values/values.sit.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+
+      - name: "check uat k8s helm charts"
+        if: env.HAS_K8S_DIR == 'true'
+        run: |
+          docker run --rm \
+            -v "$(pwd):/apps" \
+            -w /apps \
+            syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
+            template -f /apps/k8s/values/values.uat.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+
+      - name: "check prod k8s helm charts"
+        if: env.HAS_K8S_DIR == 'true'
+        run: |
+          docker run --rm \
+            -v "$(pwd):/apps" \
+            -w /apps \
+            syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
+            template -f /apps/k8s/values/values.prod.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+
+  validate-terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Project Step Calculator
+        run: |
+          echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
+          echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
+
+      - name: "Validate iam terraform"
+        if: env.HAS_IAM_DIR == 'true'
+        run: |
+          cd iam
+          terraform init -backend=false
+          terraform validate
+          cd ../..
+
+      - name: "Validate infra terraform"
+        if: env.HAS_INFRA_DIR == 'true'
+        run: |
+          cd infra
+          terraform init -backend=false
+          terraform validate
+          cd ../..
+
   validate-pr:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
 
-    - name: Check PR and commit formats
-      uses: gsactions/commit-message-checker@v1
-      if: github.event_name != 'workflow_dispatch'
-      with:
-        pattern: '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
-        error: |
-          Your commit message and your PR title must follow the format of 'JIRA-123: ' 
-          Did you forget to add your jira?
-          Did you follow the correct format?
-          
-          Please follow this format so Jira can auto detect what is in each release.
-          The regex is '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
-        checkAllCommitMessages: true
-        accessToken: ${{ secrets.GITHUB_TOKEN }} # github access token is only required if checkAllCommitMessages is true
-
     - name: Project Step Calculator
       run: |
-        echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "SNYK_AUTH_TOKEN=${{ secrets.snyk_auth_token }}" >> $GITHUB_ENV
+        echo "SNYK_AUTH_TOKEN=${{ secrets.SNYK_AUTH_TOKEN }}" >> $GITHUB_ENV
         echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
         
         cat $GITHUB_ENV
 
-    - name: Set up JDK ${{ inputs.java_version }}
-      uses: actions/setup-java@v3
-      with:
-        java-version: '${{ inputs.java_version }}'
-        distribution: 'temurin'
-        cache: maven
-
-    - name: 'Setup github packages maven settings file'
-      uses: whelk-io/maven-settings-xml-action@v4
-      with:
-        repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
-        servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
-
-
-    - name: 'Setup db wallet'
+    - name: 'Setup DB Wallet'
       if: env.ORACLE_WALLET_PRESENT == 'true'
       run: |
         echo $ORACLE_WALLET | base64 -d > ~/Wallet_LIQUIBASE.zip
@@ -84,7 +140,6 @@ jobs:
         echo "SPRING_DATASOURCE_PASSWORD=${{ secrets.oracle_dev_liquibase_atp_datasource_password }}" >> $GITHUB_ENV
         
         cat $GITHUB_ENV
-
       env:
         ORACLE_WALLET: ${{ secrets.ORACLE_DEV_LIQUIBASE_ATP_WALLET }}
 
@@ -92,68 +147,26 @@ jobs:
     - name: 'Authenticate Snyk CLI'
       run: snyk auth ${SNYK_AUTH_TOKEN}
 
-    - uses: actions/setup-python@v2
-      if: env.HAS_PRE_COMMIT == 'true'
-    - uses: cloudposse/github-action-pre-commit@v2.1.2  # run pre-commit
-      if: env.HAS_PRE_COMMIT == 'true'
-      env:
-        GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
-        GITHUB_TOKEN: ${{ secrets.github_repo_token }}
+    - name: Set up JDK ${{ inputs.java_version }}
+      uses: actions/setup-java@v3
+      with:
+        java-version: '${{ inputs.java_version }}'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: 'Setup github packages maven settings file'
+      uses: whelk-io/maven-settings-xml-action@v21
+      with:
+        repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
+        servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
 
     - name: "Build with Maven | version: ${{ github.run_number }}"
       run: |
         mvn versions:set -DnewVersion=${{ github.run_number }}
-        mvn clean install -P uberjar --batch-mode
+        mvn --batch-mode clean install ${{ inputs.build_args }}
       env:
-        GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
-        GITHUB_TOKEN: ${{ secrets.github_repo_token }}
-
-    - name: "Validate iam terraform"
-      if: env.HAS_IAM_DIR == 'true'
-      run: |
-        cd iam
-        terraform init -backend=false
-        terraform validate
-        cd ../..
-
-    - name: "Validate infra terraform"
-      if: env.HAS_INFRA_DIR == 'true'
-      run: |
-        cd infra
-        terraform init -backend=false
-        terraform validate
-        cd ../..
-
-    - name: Docker Login
-      run: |
-        docker login syd.ocir.io -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
-
-    - name: "check sit k8s helm charts"
-      if: env.HAS_K8S_DIR == 'true'
-      run: |
-        docker run --rm \
-          -v "$(pwd):/apps" \
-          -w /apps \
-          syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-          template -f /apps/k8s/values/values.sit.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
-
-    - name: "check uat k8s helm charts"
-      if: env.HAS_K8S_DIR == 'true'
-      run: |
-        docker run --rm \
-          -v "$(pwd):/apps" \
-          -w /apps \
-          syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-          template -f /apps/k8s/values/values.uat.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
-
-    - name: "check prod k8s helm charts"
-      if: env.HAS_K8S_DIR == 'true'
-      run: |
-        docker run --rm \
-          -v "$(pwd):/apps" \
-          -w /apps \
-          syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-          template -f /apps/k8s/values/values.prod.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+        GITHUB_ACTOR: ${{ secrets.CES_GITHUB_PACKAGES_READ_ACTOR }}
+        GITHUB_TOKEN: ${{ secrets.CES_GITHUB_PACKAGES_READ_TOKEN }}
 
     - name: Publish JUnit Test Report
       uses: mikepenz/action-junit-report@v3
