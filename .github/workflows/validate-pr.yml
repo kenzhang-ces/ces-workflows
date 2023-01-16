@@ -7,10 +7,6 @@ on:
         required: false
         type: string
         default: ''
-      check_all_commit_msg:
-        required: false
-        type: boolean
-        default: true
       docker_namespace:
         required: false
         type: string
@@ -48,7 +44,7 @@ jobs:
 
             Please follow this format so Jira can auto detect what is in each release.
             The regex is '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
-          checkAllCommitMessages: ${{ inputs.check_all_commit_msg }}
+          checkAllCommitMessages: true
           accessToken: ${{ secrets.GITHUB_TOKEN }} # github access token is only required if checkAllCommitMessages is true
 
   validate-k8s:
