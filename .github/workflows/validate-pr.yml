@@ -18,6 +18,10 @@ on:
     secrets:
       snyk_auth_token:
         required: false
+      github_repo_actor:
+        required: false
+      github_repo_token:
+        required: false
       docker_username:
         required: false
       docker_password:
