@@ -18,6 +18,10 @@ on:
     secrets:
       snyk_auth_token:
         required: false
+      docker_username:
+        required: false
+      docker_password:
+        required: false
       oracle_dev_liquibase_atp_datasource_url:
         required: false
       oracle_dev_liquibase_atp_datasource_username:
@@ -57,10 +61,14 @@ jobs:
       - name: Project Step Calculator
         run: |
           echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
+          echo "DOCKER_USERNAME=$( [ ! -z "${{ secrets.docker_username }}" ] && echo ${{ secrets.docker_username }} || echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_USERNAME }} )" >> $GITHUB_ENV
+          echo "DOCKER_PASSWORD=$( [ ! -z "${{ secrets.docker_password }}" ] && echo ${{ secrets.docker_password }} || echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_PASSWORD }} )" >> $GITHUB_ENV
+          
+          cat $GITHUB_ENV
 
       - name: Docker Login
         run: |
-          docker login ${{ inputs.docker_namespace }} -u ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_USERNAME }} -p "${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_PASSWORD }}"
+          docker login ${{ inputs.docker_namespace }} -u ${{ env.DOCKER_USERNAME }} -p "${{ env.DOCKER_PASSWORD }}"
 
       - name: "check sit k8s helm charts"
         if: env.HAS_K8S_DIR == 'true'
