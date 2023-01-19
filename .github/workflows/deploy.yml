@@ -39,6 +39,7 @@ jobs:
     outputs:
       HAS_IAM_DIR: ${{ steps.step-calculator.outputs.HAS_IAM_DIR }}
       HAS_INFRA_DIR: ${{ steps.step-calculator.outputs.HAS_INFRA_DIR }}
+      HAS_K8S_DIR: ${{ steps.step-calculator.outputs.HAS_K8S_DIR }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -50,6 +51,7 @@ jobs:
         run: |
           echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_OUTPUT
           echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_OUTPUT
           
           cat $GITHUB_OUTPUT
 
@@ -485,6 +487,8 @@ jobs:
             plan-infra.json
 
   deploy-app:
+    needs: [project-step-calculator]
+    if: needs.project-step-calculator.outputs.HAS_K8S_DIR == 'true'
     runs-on: ubuntu-latest
     name: Deploy App (${{ inputs.env }} -> ${{ inputs.ver }})
     environment:
