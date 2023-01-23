@@ -6,23 +6,29 @@ on:
       app_name:
         required: true
         type: string
+      build_args:
+        required: false
+        type: string
+        default: ''
       docker_namespace:
-        required: true
+        required: false
         type: string
+        default: 'syd.ocir.io/coexservices01'
       java_version:
-        required: true
+        required: false
         type: string
+        default: '17'
     secrets:
       snyk_auth_token:
-        required: true
+        required: false
       github_repo_actor:
-        required: true
+        required: false
       github_repo_token:
-        required: true
+        required: false
       docker_username:
-        required: true
+        required: false
       docker_password:
-        required: true
+        required: false
       oracle_dev_liquibase_atp_datasource_url:
         required: false
       oracle_dev_liquibase_atp_datasource_username:
@@ -33,137 +39,150 @@ on:
         required: false
   workflow_dispatch:
 
-env:
-  DOCKER_NAMESPACE: ${{ inputs.docker_namespace }}
-  DOCKER_REPO: ${{ inputs.app_name }}
-
 jobs:
+  validate-commit-msg:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Check PR and commit formats
+        uses: gsactions/commit-message-checker@v1
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          pattern: '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
+          error: |
+            Your commit message and your PR title must follow the format of 'JIRA-123: ' 
+            Did you forget to add your jira?
+            Did you follow the correct format?
+
+            Please follow this format so Jira can auto detect what is in each release.
+            The regex is '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
+          checkAllCommitMessages: true
+          accessToken: ${{ secrets.GITHUB_TOKEN }} # github access token is only required if checkAllCommitMessages is true
+
+  validate-k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Project Step Calculator
+        run: |
+          echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
+          echo "DOCKER_USERNAME=$( [ ! -z "${{ secrets.docker_username }}" ] && echo ${{ secrets.docker_username }} || echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_USERNAME }} )" >> $GITHUB_ENV
+          echo "DOCKER_PASSWORD=$( [ ! -z "${{ secrets.docker_password }}" ] && echo ${{ secrets.docker_password }} || echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_PASSWORD }} )" >> $GITHUB_ENV
+          
+          cat $GITHUB_ENV
+
+      - name: Docker Login
+        run: |
+          docker login ${{ inputs.docker_namespace }} -u ${{ env.DOCKER_USERNAME }} -p "${{ env.DOCKER_PASSWORD }}"
+
+      - name: "check sit k8s helm charts"
+        if: env.HAS_K8S_DIR == 'true'
+        run: |
+          docker run --rm \
+            -v "$(pwd):/apps" \
+            -w /apps \
+            syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
+            template -f /apps/k8s/values/values.sit.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+
+      - name: "check uat k8s helm charts"
+        if: env.HAS_K8S_DIR == 'true'
+        run: |
+          docker run --rm \
+            -v "$(pwd):/apps" \
+            -w /apps \
+            syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
+            template -f /apps/k8s/values/values.uat.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+
+      - name: "check prod k8s helm charts"
+        if: env.HAS_K8S_DIR == 'true'
+        run: |
+          docker run --rm \
+            -v "$(pwd):/apps" \
+            -w /apps \
+            syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
+            template -f /apps/k8s/values/values.prod.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
+
+  validate-terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Project Step Calculator
+        run: |
+          echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
+          echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
+
+      - name: "Validate iam terraform"
+        if: env.HAS_IAM_DIR == 'true'
+        run: |
+          cd iam
+          terraform init -backend=false
+          terraform validate
+          cd ../..
+
+      - name: "Validate infra terraform"
+        if: env.HAS_INFRA_DIR == 'true'
+        run: |
+          cd infra
+          terraform init -backend=false
+          terraform validate
+          cd ../..
+
   validate-pr:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Check PR and commit formats
-      uses: gsactions/commit-message-checker@v1
-      if: github.event_name != 'workflow_dispatch'
-      with:
-        pattern: '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
-        error: |
-          Your commit message and your PR title must follow the format of 'JIRA-123: ' 
-          Did you forget to add your jira?
-          Did you follow the correct format?
+      - name: Project Step Calculator
+        run: |
+          echo "SNYK_AUTH_TOKEN=$( [ ! -z "${{ secrets.snyk_auth_token }}" ] && echo ${{ secrets.snyk_auth_token }} || echo ${{ secrets.SNYK_AUTH_TOKEN }} )" >> $GITHUB_ENV
+          echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
           
-          Please follow this format so Jira can auto detect what is in each release.
-          The regex is '^[A-Z][A-Z0-9]+-[0-9]+: .*$'
-        checkAllCommitMessages: true
-        accessToken: ${{ secrets.GITHUB_TOKEN }} # github access token is only required if checkAllCommitMessages is true
+          cat $GITHUB_ENV
 
-    - name: Project Step Calculator
-      run: |
-        echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "HAS_PRE_COMMIT=$( [ -f .pre-commit-config.yaml ] && echo true || echo false )" >> $GITHUB_ENV
-        echo "SNYK_AUTH_TOKEN=${{ secrets.snyk_auth_token }}" >> $GITHUB_ENV
-        echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
-        
-        cat $GITHUB_ENV
+      - name: 'Setup DB Wallet'
+        if: env.ORACLE_WALLET_PRESENT == 'true'
+        run: |
+          echo $ORACLE_WALLET | base64 -d > ~/Wallet_LIQUIBASE.zip
+          unzip ~/Wallet_LIQUIBASE.zip -d ~/Wallet_LIQUIBASE
+          
+          echo "SPRING_DATASOURCE_URL=${{ secrets.oracle_dev_liquibase_atp_datasource_url }}" >> $GITHUB_ENV
+          echo "SPRING_DATASOURCE_USERNAME=${{ secrets.oracle_dev_liquibase_atp_datasource_username }}" >> $GITHUB_ENV
+          echo "SPRING_DATASOURCE_PASSWORD=${{ secrets.oracle_dev_liquibase_atp_datasource_password }}" >> $GITHUB_ENV
+          
+          cat $GITHUB_ENV
+        env:
+          ORACLE_WALLET: ${{ secrets.ORACLE_DEV_LIQUIBASE_ATP_WALLET }}
 
-    - name: Set up JDK ${{ inputs.java_version }}
-      uses: actions/setup-java@v3
-      with:
-        java-version: '${{ inputs.java_version }}'
-        distribution: 'temurin'
+      - uses: snyk/actions/setup@master
+      - name: 'Authenticate Snyk CLI'
+        run: snyk auth ${SNYK_AUTH_TOKEN}
 
-    - name: 'Setup github packages gradle settings file'
-      run: |
-        mkdir -p $HOME/.gradle
-        echo "allprojects { repositories { mavenCentral(); maven { name \"GitHubPackages\"; url uri(\"https://maven.pkg.github.com/coexservices/*\"); credentials { username githubRepoActor; password githubRepoToken } } } }" > ~/.gradle/init.gradle
-        echo "githubRepoActor=${{ secrets.github_repo_actor }}" > ~/.gradle/gradle.properties
-        echo "githubRepoToken=${{ secrets.github_repo_token }}" >> ~/.gradle/gradle.properties
+      - name: Set up JDK ${{ inputs.java_version }}
+        uses: actions/setup-java@v3
+        with:
+          java-version: '${{ inputs.java_version }}'
+          distribution: 'temurin'
+          cache: gradle
 
-    - name: Setup Gradle
-      uses: gradle/gradle-build-action@v2
+      - name: 'Setup github packages gradle settings file'
+        run: |
+          mkdir -p $HOME/.gradle
+          echo "allprojects { repositories { mavenCentral(); maven { name \"GitHubPackages\"; url uri(\"https://maven.pkg.github.com/coexservices/*\"); credentials { username githubRepoActor; password githubRepoToken } } } }" > ~/.gradle/init.gradle
+          echo "githubRepoActor=${{ secrets.GITHUB_ACTOR }}" > ~/.gradle/gradle.properties
+          echo "githubRepoToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.gradle/gradle.properties
 
-    - name: 'Setup db wallet'
-      if: env.ORACLE_WALLET_PRESENT == 'true'
-      run: |
-        echo $ORACLE_WALLET | base64 -d > ~/Wallet_LIQUIBASE.zip
-        unzip ~/Wallet_LIQUIBASE.zip -d ~/Wallet_LIQUIBASE
-        
-        echo "SPRING_DATASOURCE_URL=${{ secrets.oracle_dev_liquibase_atp_datasource_url }}" >> $GITHUB_ENV
-        echo "SPRING_DATASOURCE_USERNAME=${{ secrets.oracle_dev_liquibase_atp_datasource_username }}" >> $GITHUB_ENV
-        echo "SPRING_DATASOURCE_PASSWORD=${{ secrets.oracle_dev_liquibase_atp_datasource_password }}" >> $GITHUB_ENV
-        
-        cat $GITHUB_ENV
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
 
-      env:
-        ORACLE_WALLET: ${{ secrets.ORACLE_DEV_LIQUIBASE_ATP_WALLET }}
+      - name: "Build with Gradle | version: ${{ github.run_number }}"
+        run: |
+          ./gradlew clean build -Pversion=${{github.run_number}} ${{ inputs.build_args }}
 
-    - uses: actions/setup-python@v2
-      if: env.HAS_PRE_COMMIT == 'true'
-    - uses: cloudposse/github-action-pre-commit@v2.1.2  # run pre-commit
-      if: env.HAS_PRE_COMMIT == 'true'
-      env:
-        GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
-        GITHUB_TOKEN: ${{ secrets.github_repo_token }}
-
-    - name: "Build with Gradle | version: ${{ github.run_number }}"
-      run: |
-        ./gradlew clean build -Pversion=${{github.run_number}}
-      env:
-        GITHUB_USERNAME: ${{ secrets.github_repo_actor }}
-        GITHUB_PASSWORD: ${{ secrets.github_repo_token }}
-
-    - name: "Validate iam terraform"
-      if: env.HAS_IAM_DIR == 'true'
-      run: |
-        cd iam
-        terraform init -backend=false
-        terraform validate
-        cd ../..
-
-    - name: "Validate infra terraform"
-      if: env.HAS_INFRA_DIR == 'true'
-      run: |
-        cd infra
-        terraform init -backend=false
-        terraform validate
-        cd ../..
-
-    - name: Docker Login
-      run: |
-        docker login ${DOCKER_NAMESPACE} -u ${{ secrets.docker_username }} -p "${{ secrets.docker_password }}"
-
-    - name: "check sit k8s helm charts"
-      if: env.HAS_K8S_DIR == 'true'
-      run: |
-        docker run --rm \
-          -v "$(pwd):/apps" \
-          -w /apps \
-          syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-          template -f /apps/k8s/values/values.sit.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
-
-    - name: "check uat k8s helm charts"
-      if: env.HAS_K8S_DIR == 'true'
-      run: |
-        docker run --rm \
-          -v "$(pwd):/apps" \
-          -w /apps \
-          syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-          template -f /apps/k8s/values/values.uat.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
-
-    - name: "check prod k8s helm charts"
-      if: env.HAS_K8S_DIR == 'true'
-      run: |
-        docker run --rm \
-          -v "$(pwd):/apps" \
-          -w /apps \
-          syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-          template -f /apps/k8s/values/values.prod.yaml --set "version=${{ github.run_number }}" /apps/k8s/ --debug
-
-    - name: Publish JUnit Test Report
-      uses: mikepenz/action-junit-report@v3
-      if: always() # always run even if the previous step fails
-      with:
-        report_paths: '**/build/test-results/test/TEST-*.xml'
+      - name: Publish JUnit Test Report
+        uses: mikepenz/action-junit-report@v3
+        if: always() # always run even if the previous step fails
+        with:
+          report_paths: '**/build/test-results/test/TEST-*.xml'
