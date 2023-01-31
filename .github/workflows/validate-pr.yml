@@ -36,6 +36,9 @@ on:
         required: false
   workflow_dispatch:
 
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+
 jobs:
   validate-commit-msg:
     runs-on: ubuntu-latest
