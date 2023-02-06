@@ -6,9 +6,8 @@ on:
     secrets:
       slack_webhook_ces_engineering_team_url:
         required: false
-
-env:
-  GITHUB_TOKEN: ${{ secrets.github_token }}
+      slack_webhook_ces_release_prod_url:
+        required: false
 
 jobs:
   auto-cut-release-branch:
@@ -34,9 +33,13 @@ jobs:
 
       - name: Send msg to slack
         run: |
-          if [ ! -z "${{ secrets.slack_webhook_ces_engineering_team_url }}" ]
+          if [ ! -z "${{ secrets.slack_webhook_ces_release_prod_url }}" ]
           then
             echo "Sending slack message ;)"
+            workflows/.github/scripts/slack-cut-release-branch-msg.sh "${{ github.repository }}" "${{ secrets.slack_webhook_ces_release_prod_url }}"
+          elif [ ! -z "${{ secrets.slack_webhook_ces_engineering_team_url }}" ]
+          then
+            echo "Sending slack message to engineering channel. Consider switching your secrets to 'inherit'"
             workflows/.github/scripts/slack-cut-release-branch-msg.sh "${{ github.repository }}" "${{ secrets.slack_webhook_ces_engineering_team_url }}"
           else
             echo "Skipping slack message. Have you thought about adding the secret to your build ?"
