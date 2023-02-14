@@ -814,9 +814,34 @@ jobs:
           git tag -f -a ${{ github.repository }}-$ebv-$env -m "Tagging commit built in GitHub"
 
       - name: 'Push helm changes'
+        id: push-helm-changes
         if: inputs.dryrun != true
+        continue-on-error: true
         run: |
           cd ./argocd-gitops
+          git log -2 --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ar) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+          git push --tags
+          git push
+
+      - name: Get Action User Id
+        if: ${{ inputs.dryrun != true && steps.push-helm-changes.outcome == 'failure' }}
+        id: get-action-uid
+        run: |
+          actions_user_id=`id -u $USER`
+          echo "uid=$actions_user_id" >> $GITHUB_OUTPUT
+
+      - name: Correct Ownership in ArgoCD directory
+        if: ${{ inputs.dryrun != true && steps.push-helm-changes.outcome == 'failure' }}
+        uses: peter-murray/reset-workspace-ownership-action@v1
+        with:
+          user_id: ${{ steps.get-action-uid.outputs.uid }}
+          workspace_path: ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }}
+
+      - name: Retry push helm changes
+        if: ${{ inputs.dryrun != true && steps.push-helm-changes.outcome == 'failure' }}
+        run: |
+          cd ./argocd-gitops
+          git pull --rebase
           git log -2 --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ar) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
           git push --tags
           git push
