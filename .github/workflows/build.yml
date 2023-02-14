@@ -7,21 +7,27 @@ on:
       app_name:
         required: true
         type: string
+      build_args:
+        required: false
+        type: string
+        default: ''
       docker_namespace:
-        required: true
+        required: false
         type: string
+        default: 'syd.ocir.io/coexservices01'
       java_version:
-        required: true
+        required: false
         type: string
+        default: '17'
     secrets:
       github_repo_actor:
-        required: true
+        required: false
       github_repo_token:
-        required: true
+        required: false
       docker_username:
-        required: true
+        required: false
       docker_password:
-        required: true
+        required: false
       oracle_dev_liquibase_atp_datasource_url:
         required: false
       oracle_dev_liquibase_atp_datasource_username:
@@ -34,6 +40,7 @@ on:
 env:
   DOCKER_NAMESPACE: ${{ inputs.docker_namespace }}
   DOCKER_REPO: ${{ inputs.app_name }}
+  GITHUB_ACTOR: ${{ github.actor }}
   GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
@@ -52,14 +59,18 @@ jobs:
     - name: Project Step Calculator
       run: |
         echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
+        echo "DOCKER_USERNAME=$( [ ! -z "${{ secrets.docker_username }}" ] && echo ${{ secrets.docker_username }} || echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_USERNAME }} )" >> $GITHUB_ENV
+        echo "DOCKER_PASSWORD=$( [ ! -z "${{ secrets.docker_password }}" ] && echo ${{ secrets.docker_password }} || echo ${{ secrets.ORACLE_CONTAINER_REGISTRY_DOCKER_PASSWORD }} )" >> $GITHUB_ENV     
+        echo "MVN_REPO_USERNAME=$( [ ! -z "${{ secrets.github_repo_actor }}" ] && echo ${{ secrets.github_repo_actor }} || echo ${{ env.GITHUB_ACTOR }} )" >> $GITHUB_ENV     
+        echo "MVN_REPO_PASSWORD=$( [ ! -z "${{ secrets.github_repo_token }}" ] && echo ${{ secrets.github_repo_token }} || echo ${{ env.GITHUB_TOKEN }} )" >> $GITHUB_ENV     
         
         cat $GITHUB_ENV
         
     - name: 'Setup github packages maven settings file'
-      uses: whelk-io/maven-settings-xml-action@v4
+      uses: whelk-io/maven-settings-xml-action@v21
       with:
         repositories: '[ { "id": "github", "url": "https://maven.pkg.github.com/coexservices/*" } ]'
-        servers: '[ { "id": "github", "username": "${GITHUB_ACTOR}", "password": "${GITHUB_TOKEN}" } ]'
+        servers: '[ { "id": "github", "username": "${MVN_REPO_USERNAME}", "password": "${MVN_REPO_PASSWORD}" } ]'
 
     - name: 'Setup db wallet'
       if: env.ORACLE_WALLET_PRESENT == 'true'
@@ -80,17 +91,11 @@ jobs:
       run: |
         echo Building version ${{ github.run_number }}
         mvn versions:set -DnewVersion=${{ github.run_number }}
-        mvn clean install -P uberjar --batch-mode
-      env:
-        GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
-        GITHUB_TOKEN: ${{ secrets.github_repo_token }}
+        mvn clean install -P uberjar --batch-mode ${{ inputs.build_args }}
 
     - name: Docker Login
       run: |
-        docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}"
-      env:
-        DOCKER_USERNAME: ${{ secrets.docker_username }}
-        DOCKER_PASSWORD: ${{ secrets.docker_password }}
+        docker login ${{ inputs.docker_namespace }} -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}"
 
     - name: Build Image
       run: |
@@ -103,9 +108,6 @@ jobs:
     - name: Push Image
       run: |
         docker push --all-tags ${DOCKER_NAMESPACE}/${DOCKER_REPO}
-      env:
-        DOCKER_USERNAME: ${{ secrets.docker_username }}
-        DOCKER_PASSWORD: ${{ secrets.docker_password }}
 
     - name: Create github Release
       uses: softprops/action-gh-release@v1
