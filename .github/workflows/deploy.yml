@@ -168,11 +168,128 @@ jobs:
           name: plan-iam.json
           path: iam/plan-iam.json
 
-  deploy-terraform-plan-infra:
+  deploy-terraform-plan-infra-nonprod:
     needs: [project-step-calculator, deploy-terraform-apply-iam]
-    if: needs.project-step-calculator.outputs.HAS_INFRA_DIR == 'true'
+    if: needs.project-step-calculator.outputs.HAS_INFRA_DIR == 'true' && needs.project-step-calculator.outputs.CLUSTER == 'nonprod'
     runs-on: [self-hosted, nonprod]
-    name: Deploy terraform Plan INFRA (${{ inputs.env }} -> ${{ inputs.ver }})
+    name: Deploy terraform Plan INFRA NonProd (${{ inputs.env }} -> ${{ inputs.ver }})
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ver }}
+
+      - name: Environment Variable Setup
+        run: |
+          case ${{ inputs.env }} in
+          sit)
+          AWS_ACCOUNT_NAME=development
+          AWS_ACCOUNT_NUMBER=398662845025
+          ;;
+          uat)
+          AWS_ACCOUNT_NAME=staging
+          AWS_ACCOUNT_NUMBER=330977107317
+          ;;
+          prod)
+          AWS_ACCOUNT_NAME=production
+          AWS_ACCOUNT_NUMBER=123963708064
+          ;;
+          esac
+          
+          echo "AWS_ACCOUNT_NAME=$AWS_ACCOUNT_NAME" >> $GITHUB_ENV
+          echo "AWS_ACCOUNT_NUMBER=$AWS_ACCOUNT_NUMBER" >> $GITHUB_ENV
+          echo "REGION=ap-southeast-2" >> $GITHUB_ENV
+          
+          cat $GITHUB_ENV
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Setup Vault
+        if: inputs.needs_vault == true
+        uses: hashicorp/vault-action@v2
+        with:
+          url: https://vault.svc.coexservices.com.au
+          role: github-actions-role
+          method: jwt
+          path: github-actions
+          exportToken: true
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Configure aws credentials
+        id: login-aws
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/CloudGithubRunnerRole
+          role-session-name: GithubSession_${{ inputs.app_name }}
+          aws-region: ap-southeast-2
+
+      - name: setup python
+        uses: actions/setup-python@v4
+
+      - name: Setup AWS CLI
+        run:
+          pip3 --no-cache-dir install --upgrade awscli
+
+      - name: Assume INFRA role
+        id: assume-infra-deployer-role
+        run: |
+          output="./assume-infra-role-output.json"
+          
+          aws sts assume-role \
+            --role-arn "arn:aws:iam::${{ env.AWS_ACCOUNT_NUMBER }}:role/${{ inputs.infra_role }}" \
+            --role-session-name GithubSessionInfraDeploy_${{ inputs.app_name }} > $output
+          
+          AccessKeyId=$(cat $output | jq -r '.Credentials.AccessKeyId')
+          SecretAccessKey=$(cat $output | jq -r '.Credentials.SecretAccessKey')
+          SessionToken=$(cat $output | jq -r '.Credentials.SessionToken')
+          
+          echo "::add-mask::$AccessKeyId"
+          echo "::add-mask::$SecretAccessKey"
+          echo "::add-mask::$SessionToken"
+
+          echo "AWS_ACCESS_KEY_ID=$AccessKeyId" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$SecretAccessKey" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$SessionToken" >> $GITHUB_ENV
+          cat $output
+          cat $GITHUB_ENV
+
+      - name: Terraform Init infra
+        run: |
+          aws sts get-caller-identity
+          cd infra
+          terraform init -input=false \
+            -backend-config="bucket=coex-${{ env.AWS_ACCOUNT_NAME }}-terraform-state" \
+            -backend-config="key=${{ inputs.app_name }}/${{ env.AWS_ACCOUNT_NAME }}/${{ env.REGION }}/infra/terraform.tfstate" \
+            -backend-config="region=${{ env.REGION }}" \
+            -backend-config="dynamodb_table=coex-${{ env.AWS_ACCOUNT_NAME }}-terraform-state-lock"
+
+      - name: Terraform Plan infra
+        run: |
+          cd infra
+          terraform plan \
+            -no-color \
+            -input=false \
+            -var-file=./vars/${{ env.AWS_ACCOUNT_NAME }}.tfvars \
+            -out=plan-infra.json
+
+      - name: Upload plan infra file
+        uses: actions/upload-artifact@v3
+        with:
+          name: plan-infra.json
+          path: infra/plan-infra.json
+
+  deploy-terraform-plan-infra-prod:
+    needs: [project-step-calculator, deploy-terraform-apply-iam]
+    if: needs.project-step-calculator.outputs.HAS_INFRA_DIR == 'true' && needs.project-step-calculator.outputs.CLUSTER == 'prod'
+    runs-on: [self-hosted, prod]
+    name: Deploy terraform Plan INFRA PROD (${{ inputs.env }} -> ${{ inputs.ver }})
     permissions:
       id-token: write
       contents: read
@@ -395,7 +512,7 @@ jobs:
             plan-iam.json
 
   deploy-terraform-apply-infra-nonprod:
-    needs: [ project-step-calculator, deploy-terraform-apply-iam, deploy-terraform-plan-infra]
+    needs: [ project-step-calculator, deploy-terraform-apply-iam, deploy-terraform-plan-infra-nonprod]
     if: needs.project-step-calculator.outputs.HAS_INFRA_DIR == 'true' && needs.project-step-calculator.outputs.CLUSTER == 'nonprod'
     runs-on: [ self-hosted, nonprod ]
     name: Deploy terraform Apply INFRA NonProd (${{ inputs.env }} -> ${{ inputs.ver }})
@@ -514,7 +631,7 @@ jobs:
 
 
   deploy-terraform-apply-infra-prod:
-    needs: [ project-step-calculator, deploy-terraform-apply-iam, deploy-terraform-plan-infra]
+    needs: [ project-step-calculator, deploy-terraform-apply-iam, deploy-terraform-plan-infra-prod]
     if: needs.project-step-calculator.outputs.HAS_INFRA_DIR == 'true' && needs.project-step-calculator.outputs.CLUSTER == 'prod'
     runs-on: [ self-hosted, prod ]
     name: Deploy terraform Apply INFRA PROD (${{ inputs.env }} -> ${{ inputs.ver }})
