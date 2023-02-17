@@ -512,7 +512,7 @@ jobs:
             plan-iam.json
 
   deploy-terraform-apply-infra-nonprod:
-    needs: [ project-step-calculator, deploy-terraform-apply-iam, deploy-terraform-plan-infra-nonprod]
+    needs: [ project-step-calculator, deploy-terraform-plan-infra-nonprod]
     if: needs.project-step-calculator.outputs.HAS_INFRA_DIR == 'true' && needs.project-step-calculator.outputs.CLUSTER == 'nonprod'
     runs-on: [ self-hosted, nonprod ]
     name: Deploy terraform Apply INFRA NonProd (${{ inputs.env }} -> ${{ inputs.ver }})
@@ -631,7 +631,7 @@ jobs:
 
 
   deploy-terraform-apply-infra-prod:
-    needs: [ project-step-calculator, deploy-terraform-apply-iam, deploy-terraform-plan-infra-prod]
+    needs: [ project-step-calculator, deploy-terraform-plan-infra-prod]
     if: needs.project-step-calculator.outputs.HAS_INFRA_DIR == 'true' && needs.project-step-calculator.outputs.CLUSTER == 'prod'
     runs-on: [ self-hosted, prod ]
     name: Deploy terraform Apply INFRA PROD (${{ inputs.env }} -> ${{ inputs.ver }})
