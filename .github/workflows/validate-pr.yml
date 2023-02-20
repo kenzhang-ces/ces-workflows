@@ -178,8 +178,8 @@ jobs:
         mvn versions:set -DnewVersion=${{ github.run_number }}
         mvn --batch-mode clean install ${{ inputs.build_args }}
       env:
-        GITHUB_ACTOR: ${{ secrets.github_repo_actor }}
-        GITHUB_TOKEN: ${{ secrets.github_repo_token }}
+        GITHUB_ACTOR: ${{ secrets.CES_GITHUB_PACKAGES_READ_ACTOR }}
+        GITHUB_TOKEN: ${{ secrets.CES_GITHUB_PACKAGES_READ_TOKEN }}
 
     - name: Publish JUnit Test Report
       uses: mikepenz/action-junit-report@v3
