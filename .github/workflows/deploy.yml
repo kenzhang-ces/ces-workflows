@@ -788,7 +788,7 @@ jobs:
             -v "$(pwd):/apps" \
             -w /apps \
             syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-            template -f /apps/k8s/values/values.${{ github.event.inputs.env }}.yaml \
+            template -f /apps/k8s/values/${{ github.event.inputs.app_name }}/values.${{ github.event.inputs.env }}.yaml \
             --set "version=${{ github.event.inputs.ver }}" \
             --set "run=${{ github.run_number }}" \
             /apps/k8s/ \
