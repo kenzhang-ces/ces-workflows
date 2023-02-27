@@ -780,8 +780,8 @@ jobs:
 
       - name: 'run helm templates'
         run: |
-          rm -rf ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }} || echo "Nothing to delete"
-          mkdir -p ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }}
+          rm -rf ./argocd-gitops/${{ github.event.inputs.app_name }}/${{ github.event.inputs.env }} || echo "Nothing to delete"
+          mkdir -p ./argocd-gitops/${{ github.event.inputs.app_name }}/${{ github.event.inputs.env }}
 
           docker login syd.ocir.io -u ${DOCKER_USERNAME} -p "${DOCKER_PASSWORD}"
           docker run --rm \
