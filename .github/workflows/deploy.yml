@@ -26,6 +26,10 @@ on:
         required: false
         type: boolean
         default: false
+      k8s_directory:
+        required: false
+        type: string
+        default: 'k8s'
     secrets:
       service_account_access_token:
         required: false
@@ -788,10 +792,10 @@ jobs:
             -v "$(pwd):/apps" \
             -w /apps \
             syd.ocir.io/coexservices01/alpine/helm:3.9.0 \
-            template -f /apps/k8s/values/${{ inputs.app_name }}/values.${{ github.event.inputs.env }}.yaml \
+            template -f /apps/{{ inputs.k8s_directory }}/values/values.${{ github.event.inputs.env }}.yaml \
             --set "version=${{ github.event.inputs.ver }}" \
             --set "run=${{ github.run_number }}" \
-            /apps/k8s/ \
+            /apps/{{ inputs.k8s_directory }}/ \
             --debug \
             --output-dir ./argocd-gitops/${{ inputs.app_name }}/${{ github.event.inputs.env }}
 
