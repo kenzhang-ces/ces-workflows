@@ -60,7 +60,7 @@ jobs:
         run: |
           echo "HAS_IAM_DIR=$( [ -d ./iam ] && echo true || echo false )" >> $GITHUB_OUTPUT
           echo "HAS_INFRA_DIR=$( [ -d ./infra ] && echo true || echo false )" >> $GITHUB_OUTPUT
-          echo "HAS_K8S_DIR=$( [ -d ./k8s ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "HAS_K8S_DIR=$( [ -d ./${{ inputs.k8s_directory }} ] && echo true || echo false )" >> $GITHUB_OUTPUT
           echo "CLUSTER=$( if [ \"prod\" = \"${{ inputs.env }}\" ]; then echo prod; else echo nonprod; fi )" >> $GITHUB_OUTPUT
           
           cat $GITHUB_OUTPUT
