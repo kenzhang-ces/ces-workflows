@@ -34,7 +34,6 @@ on:
 env:
   DOCKER_NAMESPACE: ${{ inputs.docker_namespace }}
   DOCKER_REPO: ${{ inputs.app_name }}
-  GITHUB_ACTOR: ${{ github.actor }}
   GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
