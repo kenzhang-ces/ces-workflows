@@ -172,8 +172,8 @@ jobs:
         run: |
           mkdir -p $HOME/.gradle
           echo "allprojects { repositories { mavenCentral(); maven { name \"GitHubPackages\"; url uri(\"https://maven.pkg.github.com/coexservices/*\"); credentials { username githubRepoActor; password githubRepoToken } } } }" > ~/.gradle/init.gradle
-          echo "githubRepoActor=${{ MVN_REPO_USERNAME }}" > ~/.gradle/gradle.properties
-          echo "githubRepoToken=${{ MVN_REPO_PASSWORD }}" >> ~/.gradle/gradle.properties
+          echo "githubRepoActor=${{ env.MVN_REPO_USERNAME }}" > ~/.gradle/gradle.properties
+          echo "githubRepoToken=${{ env.MVN_REPO_PASSWORD }}" >> ~/.gradle/gradle.properties
 
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
