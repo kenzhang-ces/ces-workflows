@@ -170,6 +170,8 @@ jobs:
       - name: 'Setup github packages gradle settings file'
         run: |
           mkdir -p $HOME/.gradle
+          echo "githubRepoActor=${{ secrets.GITHUB_ACTOR }}"
+          echo "githubRepoToken=${{ secrets.GITHUB_TOKEN }}"
           echo "allprojects { repositories { mavenCentral(); maven { name \"GitHubPackages\"; url uri(\"https://maven.pkg.github.com/coexservices/*\"); credentials { username githubRepoActor; password githubRepoToken } } } }" > ~/.gradle/init.gradle
           echo "githubRepoActor=${{ secrets.GITHUB_ACTOR }}" > ~/.gradle/gradle.properties
           echo "githubRepoToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.gradle/gradle.properties
