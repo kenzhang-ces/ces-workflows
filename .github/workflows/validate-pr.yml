@@ -137,9 +137,10 @@ jobs:
 
       - name: Project Step Calculator
         run: |
+          echo "MVN_REPO_USERNAME=$( [ ! -z "${{ secrets.github_repo_actor }}" ] && echo ${{ secrets.github_repo_actor }} || echo ${{ env.GITHUB_ACTOR }} )" >> $GITHUB_ENV     
+          echo "MVN_REPO_PASSWORD=$( [ ! -z "${{ secrets.github_repo_token }}" ] && echo ${{ secrets.github_repo_token }} || echo ${{ env.GITHUB_TOKEN }} )" >> $GITHUB_ENV     
           echo "SNYK_AUTH_TOKEN=$( [ ! -z "${{ secrets.snyk_auth_token }}" ] && echo ${{ secrets.snyk_auth_token }} || echo ${{ secrets.SNYK_AUTH_TOKEN }} )" >> $GITHUB_ENV
           echo "ORACLE_WALLET_PRESENT=$( [ ! -z "${{ secrets.oracle_dev_liquibase_atp_wallet }}" ] && echo true || echo false )" >> $GITHUB_ENV
-          
           cat $GITHUB_ENV
 
       - name: 'Setup DB Wallet'
@@ -171,8 +172,8 @@ jobs:
         run: |
           mkdir -p $HOME/.gradle
           echo "allprojects { repositories { mavenCentral(); maven { name \"GitHubPackages\"; url uri(\"https://maven.pkg.github.com/coexservices/*\"); credentials { username githubRepoActor; password githubRepoToken } } } }" > ~/.gradle/init.gradle
-          echo "githubRepoActor=${{ secrets.GITHUB_ACTOR }}" > ~/.gradle/gradle.properties
-          echo "githubRepoToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.gradle/gradle.properties
+          echo "githubRepoActor=${{ env.MVN_REPO_USERNAME }}" > ~/.gradle/gradle.properties
+          echo "githubRepoToken=${{ env.MVN_REPO_PASSWORD }}" >> ~/.gradle/gradle.properties
 
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
